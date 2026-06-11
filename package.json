@@ -1,0 +1,63 @@
+{
+  "name": "db-visualizer",
+  "version": "1.0.0",
+  "description": "Minimalist and powerful database visualizer for Windows 7/10/11",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "electron:dev": "electron .",
+    "build": "vite build",
+    "package": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "lucide-react": "^0.436.0",
+    "mysql2": "^3.11.0",
+    "pg": "^8.12.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.14.1",
+    "tedious": "^18.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "22.3.27",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.4.2"
+  },
+  "build": {
+    "appId": "com.db.visualizer",
+    "productName": "DbVisualizerLite",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "main.js",
+      "preload.js",
+      "dbService.js",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
