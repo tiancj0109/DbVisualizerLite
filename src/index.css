@@ -476,9 +476,9 @@ body {
   border-bottom: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   white-space: nowrap;
-  max-width: 240px; /* Limit cell width to avoid giant stretched cells */
   overflow: hidden;
   text-overflow: ellipsis;
+  position: relative;
 }
 
 .table-wrapper tr:hover td {
@@ -492,6 +492,109 @@ body {
 .type-null {
   color: var(--text-dark);
   font-style: italic;
+}
+
+/* Cell Content Wrapper for Copy Button */
+.cell-content-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 20px;
+}
+
+.cell-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-hover {
+  position: relative;
+}
+
+/* Copy Button Styles */
+.copy-btn {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.cell-hover .copy-btn {
+  opacity: 1;
+}
+
+.copy-btn:hover {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: white;
+}
+
+.copy-btn.copied {
+  background-color: var(--success-color);
+  border-color: var(--success-color);
+  color: white;
+}
+
+/* Resize Handle Styles */
+.resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 15;
+  transition: background-color 0.15s ease;
+}
+
+.resize-handle:hover {
+  background-color: var(--accent-color);
+}
+
+.resize-handle.active {
+  background-color: var(--accent-color);
+}
+
+/* Header Content Layout */
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  padding-right: 8px;
+}
+
+.table-wrapper th.no-sort .header-content {
+  cursor: default;
+}
+
+.header-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sort-indicator {
+  flex-shrink: 0;
+}
+
+/* Resizing State */
+.table-wrapper th.resizing {
+  user-select: none;
+  background-color: var(--bg-surface-hover);
 }
 
 /* Pagination */

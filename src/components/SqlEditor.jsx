@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, FileCode, History, Trash, Download, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import ResizableTableHeader from './ResizableTableHeader';
+import CopyableCell from './CopyableCell';
 
 export default function SqlEditor({ initialQuery = '' }) {
   const [sql, setSql] = useState(initialQuery);
@@ -7,6 +9,14 @@ export default function SqlEditor({ initialQuery = '' }) {
   const [result, setResult] = useState(null); // { success, rows, columns, affectedRows, duration, error }
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [columnWidths, setColumnWidths] = useState({});
+
+  const handleColumnWidthChange = (col, width) => {
+    setColumnWidths(prev => ({
+      ...prev,
+      [col]: width
+    }));
+  };
 
   useEffect(() => {
     // Load query history from localStorage
@@ -40,6 +50,7 @@ export default function SqlEditor({ initialQuery = '' }) {
     if (!sql.trim()) return;
     setLoading(true);
     setResult(null);
+    setColumnWidths({}); // Reset column widths for new query
     try {
       saveToHistory(sql);
       const res = await window.electronAPI.executeRawQuery(sql);
@@ -240,28 +251,23 @@ export default function SqlEditor({ initialQuery = '' }) {
             /* Selected grid output */
             <div className="table-wrapper" style={{ maxHeight: '100%' }}>
               <table>
-                <thead>
-                  <tr>
-                    {result.columns.map(col => (
-                      <th key={col} title={col}>{col}</th>
-                    ))}
-                  </tr>
-                </thead>
+                <ResizableTableHeader
+                  columns={result.columns}
+                  columnWidths={columnWidths}
+                  onColumnWidthChange={handleColumnWidthChange}
+                  sortBy={null}
+                  sortOrder={null}
+                />
                 <tbody>
                   {result.rows.map((row, idx) => (
                     <tr key={idx}>
-                      {result.columns.map(col => {
-                        const val = row[col];
-                        return (
-                          <td key={col} title={val === null || val === undefined ? 'NULL' : String(val)}>
-                            {val === null || val === undefined ? (
-                              <span className="badge badge-null">NULL</span>
-                            ) : (
-                              String(val)
-                            )}
-                          </td>
-                        );
-                      })}
+                      {result.columns.map(col => (
+                        <CopyableCell
+                          key={col}
+                          value={row[col]}
+                          column={col}
+                        />
+                      ))}
                     </tr>
                   ))}
                 </tbody>

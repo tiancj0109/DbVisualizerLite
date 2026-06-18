@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Play, RefreshCw, Filter, Download, Upload, Plus, Trash, 
-  ChevronLeft, ChevronRight, ChevronDown, ChevronsUpDown 
+import {
+  Play, RefreshCw, Filter, Download, Upload, Plus, Trash,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronsUpDown
 } from 'lucide-react';
+import ResizableTableHeader from './ResizableTableHeader';
+import CopyableCell from './CopyableCell';
 
 export default function TableViewer({ tableName, onOpenQuery }) {
   const [activeTab, setActiveTab] = useState('data'); // 'data' or 'schema'
@@ -24,6 +26,16 @@ export default function TableViewer({ tableName, onOpenQuery }) {
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState([]); // Array of { column, operator, value }
 
+  // Column Width State
+  const [columnWidths, setColumnWidths] = useState({});
+
+  const handleColumnWidthChange = (col, width) => {
+    setColumnWidths(prev => ({
+      ...prev,
+      [col]: width
+    }));
+  };
+
   useEffect(() => {
     // Reset state on table change
     setPage(1);
@@ -31,6 +43,7 @@ export default function TableViewer({ tableName, onOpenQuery }) {
     setSortOrder('asc');
     setFilters([]);
     setShowFilters(false);
+    setColumnWidths({}); // Reset column widths when table changes
     fetchSchemaAndData();
   }, [tableName]);
 
@@ -309,42 +322,24 @@ export default function TableViewer({ tableName, onOpenQuery }) {
             ) : (
               <div className="table-wrapper">
                 <table>
-                  <thead>
-                    <tr>
-                      {columns.map(col => {
-                        const isSorted = sortBy === col;
-                        return (
-                          <th key={col} onClick={() => handleSort(col)} className="sortable-header" title={col}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
-                              <span>{col}</span>
-                              {isSorted ? (
-                                <span style={{ color: 'var(--accent-color)', fontSize: '10px' }}>
-                                  {sortOrder === 'asc' ? '▲' : '▼'}
-                                </span>
-                              ) : (
-                                <ChevronsUpDown size={11} style={{ color: 'var(--text-dark)' }} />
-                              )}
-                            </div>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
+                  <ResizableTableHeader
+                    columns={columns}
+                    columnWidths={columnWidths}
+                    onColumnWidthChange={handleColumnWidthChange}
+                    onSort={handleSort}
+                    sortBy={sortBy}
+                    sortOrder={sortOrder}
+                  />
                   <tbody>
                     {rows.map((row, idx) => (
                       <tr key={idx}>
-                        {columns.map(col => {
-                          const val = row[col];
-                          return (
-                            <td key={col} title={val === null || val === undefined ? 'NULL' : String(val)}>
-                              {val === null || val === undefined ? (
-                                <span className="badge badge-null">NULL</span>
-                              ) : (
-                                String(val)
-                              )}
-                            </td>
-                          );
-                        })}
+                        {columns.map(col => (
+                          <CopyableCell
+                            key={col}
+                            value={row[col]}
+                            column={col}
+                          />
+                        ))}
                       </tr>
                     ))}
                   </tbody>
