@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import DbExplorer from './components/DbExplorer';
 import ConnectionModal from './components/ConnectionModal';
@@ -13,19 +13,47 @@ export default function App() {
   const [activeDb, setActiveDb] = useState('');
   const [tables, setTables] = useState([]);
   const [activeTable, setActiveTable] = useState('');
-  
+
   // Tab Management
   const [tabs, setTabs] = useState([]); // Array of { id, title, type, tableName, initialQuery }
   const [activeTabId, setActiveTabId] = useState('');
+
+  // Context Menu for Tabs
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0 });
+  const contextMenuRef = useRef(null);
 
   // Modals & Forms
   const [showModal, setShowModal] = useState(false);
   const [editingConnection, setEditingConnection] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [connectionLostMsg, setConnectionLostMsg] = useState('');
 
   useEffect(() => {
     loadConnections();
+
+    // Listen for connection-lost event from backend
+    const cleanupLost = window.electronAPI.onConnectionLost(() => {
+      // Clear connection state
+      setActiveConnection(null);
+      setDatabases([]);
+      setActiveDb('');
+      setTables([]);
+      setActiveTable('');
+      setTabs([]);
+      setActiveTabId('');
+      setConnectionLostMsg('数据库连接已断开，请重新连接。');
+    });
+
+    // Listen for connection-restored event from backend (auto-reconnect success)
+    const cleanupRestored = window.electronAPI.onConnectionRestored(() => {
+      setConnectionLostMsg('');
+    });
+
+    return () => {
+      cleanupLost();
+      cleanupRestored();
+    };
   }, []);
 
   const loadConnections = async () => {
@@ -84,9 +112,10 @@ export default function App() {
     if (activeConnection && activeConnection.id === conn.id) {
       return;
     }
-    
+
     setConnecting(true);
     setErrorMessage('');
+    setConnectionLostMsg(''); // Clear connection lost message when reconnecting
     setTables([]);
     setDatabases([]);
     setActiveDb('');
@@ -191,7 +220,7 @@ export default function App() {
     const tabIndex = tabs.findIndex(t => t.id === tabId);
     const nextTabs = tabs.filter(t => t.id !== tabId);
     setTabs(nextTabs);
-    
+
     if (activeTabId === tabId) {
       if (nextTabs.length > 0) {
         const nextActiveIndex = Math.min(tabIndex, nextTabs.length - 1);
@@ -201,6 +230,32 @@ export default function App() {
       }
     }
   };
+
+  const handleCloseAllTabs = () => {
+    setTabs([]);
+    setActiveTabId('');
+    setContextMenu({ visible: false, x: 0, y: 0 });
+  };
+
+  const handleTabContextMenu = (e) => {
+    e.preventDefault();
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY });
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenu({ visible: false, x: 0, y: 0 });
+  };
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (contextMenu.visible && contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+        setContextMenu({ visible: false, x: 0, y: 0 });
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [contextMenu.visible]);
 
   // 通过特定 SQL 文本打开新 SQL 标签页
   const handleOpenQueryWithSql = (sqlText) => {
@@ -248,11 +303,11 @@ export default function App() {
         {activeConnection ? (
           <>
             {/* 工作区标签页栏 */}
-            <div className="workspace-tabs">
+            <div className="workspace-tabs" onContextMenu={handleTabContextMenu}>
               {tabs.map(tab => {
                 const isActive = activeTabId === tab.id;
                 return (
-                  <div 
+                  <div
                     key={tab.id}
                     className={`workspace-tab ${isActive ? 'active' : ''}`}
                     onClick={() => setActiveTabId(tab.id)}
@@ -265,14 +320,28 @@ export default function App() {
                   </div>
                 );
               })}
-              <button 
-                className="icon-btn" 
+              <button
+                className="icon-btn"
                 style={{ padding: '6px 12px', color: 'var(--text-muted)', borderTopLeftRadius: '6px', borderTopRightRadius: '6px', cursor: 'pointer' }}
                 onClick={() => openQueryTab('SQL 查询', '')}
                 title="新建 SQL 查询"
               >
                 <Plus size={14} />
               </button>
+
+              {/* 右键菜单 */}
+              {contextMenu.visible && (
+                <div
+                  ref={contextMenuRef}
+                  className="context-menu"
+                  style={{ left: contextMenu.x, top: contextMenu.y }}
+                >
+                  <div className="context-menu-item" onClick={handleCloseAllTabs}>
+                    <X size={14} />
+                    <span>关闭全部标签页</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 标签页内容显示 */}
@@ -323,9 +392,15 @@ export default function App() {
                 <Database size={48} style={{ color: 'var(--text-dark)' }} />
                 <span className="empty-state-title">暂无活动连接</span>
                 <span style={{ fontSize: '13px', maxWidth: '400px', textAlign: 'center' }}>
-                  请在左侧列表中双击以开启已保存的数据库连接，或点击左下角的“新建连接”按钮配置新的数据库。
+                  请在左侧列表中双击以开启已保存的数据库连接，或点击左下角的"新建连接"按钮配置新的数据库。
                 </span>
-                
+
+                {connectionLostMsg && (
+                  <div className="badge" style={{ padding: '8px 16px', marginTop: '16px', maxWidth: '400px', whiteSpace: 'pre-wrap', backgroundColor: 'var(--warning-bg)', color: 'var(--warning-text)' }}>
+                    {connectionLostMsg}
+                  </div>
+                )}
+
                 {errorMessage && (
                   <div className="badge btn-danger" style={{ padding: '8px 16px', marginTop: '16px', maxWidth: '400px', whiteSpace: 'pre-wrap' }}>
                     {errorMessage}

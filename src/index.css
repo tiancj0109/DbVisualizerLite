@@ -15,6 +15,8 @@
   --success-color: #10b981;
   --error-color: #ef4444;
   --warning-color: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --warning-text: #f59e0b;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
@@ -966,3 +968,35 @@ input:focus, select:focus, textarea:focus {
 .font-semibold { font-weight: 600; }
 .h-full { height: 100%; }
 .overflow-auto { overflow: auto; }
+
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 160px;
+  box-shadow: var(--shadow-lg);
+  transform: translate(-5px, 5px);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.context-menu-item:hover {
+  background-color: var(--bg-surface-hover);
+}
+
+.context-menu-item:active {
+  background-color: var(--bg-active);
+}

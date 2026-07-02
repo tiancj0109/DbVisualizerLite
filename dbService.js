@@ -67,29 +67,171 @@ let activeConnection = null;
 let activeDbType = null;
 let activeDbConfig = null;
 
+// Store reference to main window for sending connection status updates
+let mainWindowRef = null;
+// Flag to prevent concurrent reconnect attempts
+let isReconnecting = false;
+
+function setMainWindow(win) {
+  mainWindowRef = win;
+}
+
+function notifyConnectionLost() {
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+    mainWindowRef.webContents.send('connection-lost');
+  }
+}
+
+function notifyConnectionRestored() {
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+    mainWindowRef.webContents.send('connection-restored');
+  }
+}
+
+// Check if connection is still valid (ping/health check)
+async function checkConnectionHealth() {
+  if (!activeConnection || !activeDbType) {
+    return false;
+  }
+
+  try {
+    if (activeDbType === 'mysql') {
+      // MySQL: execute a simple ping query
+      await activeConnection.query('SELECT 1');
+      return true;
+    } else if (activeDbType === 'pg') {
+      // PostgreSQL: try a simple query to verify connection
+      // Don't rely on internal _connected property
+      await activeConnection.query('SELECT 1');
+      return true;
+    } else if (activeDbType === 'mssql') {
+      // SQL Server: check if connection is still connected
+      if (!activeConnection.connection || activeConnection.connection.closed) {
+        return false;
+      }
+      await activeConnection.query('SELECT 1');
+      return true;
+    } else if (activeDbType === 'sqlite') {
+      // SQLite: file-based, check if db object exists
+      return activeConnection.db !== null;
+    }
+    return true;
+  } catch (err) {
+    console.error('Connection health check failed:', err.message);
+    return false;
+  }
+}
+
+// Attempt to reconnect using saved config
+async function attemptReconnect() {
+  // Prevent concurrent reconnect attempts
+  if (isReconnecting) {
+    return false;
+  }
+  if (!activeDbConfig) {
+    return false;
+  }
+
+  isReconnecting = true;
+  console.log('Attempting to reconnect...');
+
+  try {
+    // Use existing connect logic (don't clear state - connect() will handle cleanup)
+    await DbService.connect(activeDbConfig);
+    console.log('Reconnected successfully');
+    notifyConnectionRestored();
+    return true;
+  } catch (err) {
+    console.error('Reconnect failed:', err.message);
+    activeConnection = null;
+    activeDbType = null;
+    activeDbConfig = null; // Clear config to prevent infinite reconnect attempts
+    notifyConnectionLost();
+    return false;
+  } finally {
+    isReconnecting = false;
+  }
+}
+
+// Wrapper: ensure connection is valid before operation, attempt reconnect if needed
+async function ensureConnection(maxRetries = 1) {
+  // Wait if reconnecting
+  if (isReconnecting) {
+    throw new Error('正在尝试重新连接数据库，请稍候...');
+  }
+
+  if (!activeConnection) {
+    throw new Error('No active database connection.');
+  }
+
+  const isHealthy = await checkConnectionHealth();
+  if (!isHealthy) {
+    // Connection is dead, try to reconnect
+    if (activeDbConfig && maxRetries > 0) {
+      const reconnected = await attemptReconnect();
+      if (!reconnected) {
+        throw new Error('数据库连接已断开，尝试重新连接失败。请手动重新连接。');
+      }
+    } else {
+      notifyConnectionLost();
+      throw new Error('数据库连接已断开。请重新连接。');
+    }
+  }
+
+  return true;
+}
+
 // Wrap SQL Server connection in a promise-based helper
 class TediousWrapper {
   constructor(config) {
     this.config = config;
     this.connection = null;
+    this.closed = false; // Track connection state
   }
 
   connect() {
     return new Promise((resolve, reject) => {
       this.connection = new TediousConnection(this.config);
+      this.closed = false;
+
       this.connection.on('connect', (err) => {
-        if (err) reject(err);
-        else resolve(this);
+        if (err) {
+          this.closed = true;
+          reject(err);
+        } else resolve(this);
       });
-      // Handle connection errors
+
+      // Handle connection errors and update state
       this.connection.on('error', (err) => {
         console.error('Tedious error:', err);
+        // Mark connection as closed on fatal errors
+        const fatalCodes = ['ESOCKET', 'ECONNRESET', 'ECONNABORTED', 'ETIMEOUT', 'ENOTFOUND'];
+        const isFatal = fatalCodes.includes(err.code) ||
+          (err.message && err.message.toLowerCase().includes('closed'));
+
+        if (isFatal) {
+          this.closed = true;
+          if (activeDbType === 'mssql' && activeConnection === this) {
+            activeConnection = null;
+            notifyConnectionLost();
+          }
+        }
+      });
+
+      // Track when connection is intentionally closed
+      this.connection.on('end', () => {
+        this.closed = true;
       });
     });
   }
 
   query(sql) {
     return new Promise((resolve, reject) => {
+      if (this.closed || !this.connection) {
+        reject(new Error('Connection is closed'));
+        return;
+      }
+
       const request = new TediousRequest(sql, (err, rowCount, rows) => {
         if (err) {
           reject(err);
@@ -111,6 +253,7 @@ class TediousWrapper {
 
   close() {
     if (this.connection) {
+      this.closed = true;
       this.connection.close();
     }
   }
@@ -239,9 +382,24 @@ const DbService = {
           password: password,
           database: database || undefined,
           charset: 'utf8mb4',
-          connectTimeout: 5000
+          connectTimeout: 5000,
+          // Keep-alive settings to prevent connection timeout
+          waitForConnections: true,
+          queueLimit: 0,
+          enableKeepAlive: true,
+          keepAliveInitialDelay: 10000 // 10 seconds
         });
         const conn = await withTimeout(connPromise, 6000, '连接 MySQL 超时，请检查网络、主机和端口。');
+
+        // Handle connection errors gracefully
+        conn.on('error', (err) => {
+          console.error('MySQL connection error:', err.message);
+          if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ECONNRESET') {
+            activeConnection = null;
+            notifyConnectionLost();
+          }
+        });
+
         activeConnection = conn;
         activeDbType = 'mysql';
         activeDbConfig = config;
@@ -253,8 +411,19 @@ const DbService = {
           user: username,
           password: password,
           database: database || 'postgres',
-          connectionTimeoutMillis: 5000
+          connectionTimeoutMillis: 5000,
+          // Keep-alive settings
+          keepAlive: true,
+          keepAliveInitialDelayMillis: 10000 // 10 seconds
         });
+
+        // Handle connection errors gracefully
+        client.on('error', (err) => {
+          console.error('PostgreSQL connection error:', err.message);
+          activeConnection = null;
+          notifyConnectionLost();
+        });
+
         await withTimeout(client.connect(), 6000, '连接 PostgreSQL 超时，请检查网络、主机和端口。');
         activeConnection = client;
         activeDbType = 'pg';
@@ -303,8 +472,8 @@ const DbService = {
   },
 
   async getDatabases() {
-    if (!activeConnection) throw new Error('No active database connection.');
-    
+    await ensureConnection();
+
     if (activeDbType === 'mysql') {
       const [rows] = await activeConnection.query('SHOW DATABASES');
       return rows.map(r => r.Database || r.database);
@@ -321,8 +490,8 @@ const DbService = {
   },
 
   async selectDatabase(dbName) {
-    if (!activeConnection) throw new Error('No active database connection.');
-    
+    await ensureConnection();
+
     if (activeDbType === 'mysql') {
       await activeConnection.query(`USE \`${dbName}\``);
       activeDbConfig.database = dbName;
@@ -340,8 +509,8 @@ const DbService = {
   },
 
   async getTables() {
-    if (!activeConnection) throw new Error('No active database connection.');
-    
+    await ensureConnection();
+
     if (activeDbType === 'mysql') {
       const [rows] = await activeConnection.query('SHOW TABLES');
       return rows.map(r => Object.values(r)[0]);
@@ -365,7 +534,7 @@ const DbService = {
   },
 
   async getTableSchema(tableName) {
-    if (!activeConnection) throw new Error('No active database connection.');
+    await ensureConnection();
     
     if (activeDbType === 'mysql') {
       const [rows] = await activeConnection.query(`DESCRIBE \`${tableName}\``);
@@ -424,7 +593,7 @@ const DbService = {
   },
 
   async getTableData({ tableName, page = 1, pageSize = 50, sortBy, sortOrder, filters = [] }) {
-    if (!activeConnection) throw new Error('No active database connection.');
+    await ensureConnection();
     
     const offset = (page - 1) * pageSize;
     
@@ -528,7 +697,7 @@ const DbService = {
   },
 
   async executeQuery(sql) {
-    if (!activeConnection) throw new Error('No active database connection.');
+    await ensureConnection();
     
     const startTime = Date.now();
     try {
@@ -625,7 +794,7 @@ const DbService = {
   },
 
   async exportTable({ tableName, filePath, format }) {
-    if (!activeConnection) throw new Error('No active database connection.');
+    await ensureConnection();
     
     // Fetch all data in the table for export
     let rows = [];
@@ -678,7 +847,7 @@ const DbService = {
   },
 
   async importTableCSV({ tableName, filePath }) {
-    if (!activeConnection) throw new Error('No active database connection.');
+    await ensureConnection();
     
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = parseCSV(content);
@@ -780,7 +949,7 @@ const DbService = {
   },
 
   async importSqlFile({ filePath }) {
-    if (!activeConnection) throw new Error('No active database connection.');
+    await ensureConnection();
     
     const content = fs.readFileSync(filePath, 'utf-8');
     
@@ -861,7 +1030,10 @@ const DbService = {
   async disconnect() {
     await closeActiveConnection();
     return { success: true };
-  }
+  },
+
+  // Export setMainWindow for main.js to call
+  setMainWindow
 };
 
 module.exports = DbService;

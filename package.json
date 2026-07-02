@@ -1,6 +1,6 @@
 {
   "name": "db-visualizer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Minimalist and powerful database visualizer for Windows 7/10/11",
   "main": "main.js",
   "scripts": {

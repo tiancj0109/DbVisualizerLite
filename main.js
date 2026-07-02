@@ -79,10 +79,14 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    // Set mainWindow reference in DbService for connection status notifications
+    DbService.setMainWindow(mainWindow);
   });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    // Clear mainWindow reference in DbService
+    DbService.setMainWindow(null);
   });
 }
 
